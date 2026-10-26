@@ -1,0 +1,9 @@
+streamlit
+anthropic
+pandas
+scikit-learn
+pdfplumber
+python-docx
+python-dotenv
+textstat
+Pillow
