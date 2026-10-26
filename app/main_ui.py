@@ -2,6 +2,7 @@ import streamlit as st
 
 from app import views
 from app.core import llm
+from app import seed
 from app.db import database as db
 from app.ui import STATUS_LABEL, run_review, set_sample, show_draft
 
@@ -9,6 +10,7 @@ from app.ui import STATUS_LABEL, run_review, set_sample, show_draft
 def main():
     st.set_page_config(page_title="BrandLens", page_icon="\U0001F33F", layout="wide")
     db.init_db()
+    seed.seed_demo()
     st.markdown(views.EXTRA_CSS, unsafe_allow_html=True)
     st.session_state.setdefault("draft_text", "")
     st.session_state.setdefault("draft_title", "")
@@ -45,6 +47,14 @@ def main():
         st.caption("Demo brand: GreenLeaf Organics (fictional). AI only suggests; humans decide.")
 
     views.header(role)
+    with st.expander("New here? Try it in 60 seconds", expanded=True):
+        st.markdown(
+            "1. Stay on **Creator**, press **Load sample post**, then **Run review**.  \n"
+            "2. Accept or dispute each finding, then press **Submit for review**.  \n"
+            "3. Switch to **Manager** in the left sidebar and **Approve** or **Request changes**.  \n"
+            "4. **Reviewer** sees a claim-verification table; **Admin** manages the brand knowledge.  \n"
+            "Three demo drafts are already loaded so you can explore each role straight away."
+        )
 
     if role == "Creator":
         left, right = st.columns([1, 1.5], gap="large")
