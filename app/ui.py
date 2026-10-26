@@ -4,6 +4,7 @@ import streamlit as st
 
 from app.core.rules import review_text
 from app.db import database as db
+from app.db import workflow as wf
 
 ROLES = {
     "Creator": "Riya (Creator)",
@@ -13,6 +14,13 @@ ROLES = {
 }
 SEV_ICON = {"high": "\U0001F534", "medium": "\U0001F7E0", "low": "\U0001F7E1"}
 SEV_BG = {"high": "#ffcdd2", "medium": "#ffe0b2", "low": "#fff9c4"}
+STATUS_LABEL = {
+    "draft": "Draft",
+    "in_review": "In review",
+    "changes_requested": "Changes requested",
+    "approved": "Approved",
+}
+EDITABLE = ("draft", "changes_requested")
 
 SAMPLE = (
     "Our BEST cosmetics are 100% natural and clinically proven!!! "
@@ -59,6 +67,79 @@ def run_review(user, role):
     st.rerun()
 
 
+def post_comment(did, user, role):
+    key = "cm_%d" % did
+    body = st.session_state.get(key, "").strip()
+    if body:
+        wf.add_comment(did, user, role, body)
+        st.session_state[key] = ""
+
+
+def workflow_panel(role, user, did, draft, ver, findings):
+    status = draft["status"]
+    open_n = sum(1 for f in findings if f["status"] == "open")
+    disputed = [f for f in findings if f["status"] == "disputed"]
+
+    if status == "approved":
+        st.success("This draft is approved by a human reviewer and ready to publish.")
+        copy = (
+            ver["content"]
+            + "\n\n---\nReviewed with BrandLens (AI-assisted findings, human-approved). Draft #%d, version %d."
+            % (did, ver["version_no"])
+        )
+        st.download_button(
+            "Download approved copy", copy, file_name="approved_draft_%d.txt" % did, mime="text/plain"
+        )
+        return
+
+    if role == "Creator" and status in EDITABLE:
+        if status == "changes_requested":
+            st.warning("A reviewer requested changes. Check the comments tab, edit, and resubmit.")
+        if open_n:
+            st.info("Accept or dispute all %d open findings to submit this draft for review." % open_n)
+        elif st.button("Submit for review", type="primary"):
+            wf.set_status(did, "in_review", user, role, "version %d" % ver["version_no"])
+            st.rerun()
+        with st.expander("Edit this draft (saves a new version and re-runs the review)"):
+            key = "edit_%d_%d" % (did, ver["version_no"])
+            st.text_area("Edited text", value=ver["content"], key=key, height=160)
+            if st.button("Save as new version and re-review", key="save_" + key):
+                new = st.session_state[key].strip()
+                if new and new != ver["content"].strip():
+                    vid, vno = db.add_version(did, new, user)
+                    fs = review_text(new)
+                    db.save_findings(vid, fs)
+                    wf.set_status(did, "draft", user, role, "new version %d" % vno)
+                    db.log(did, user, role, "new_version", "v%d, %d findings" % (vno, len(fs)))
+                    st.rerun()
+                else:
+                    st.warning("Change the text first.")
+    elif role in ("Manager", "Reviewer") and status == "in_review":
+        st.info("This draft is waiting for your decision.")
+        if disputed:
+            st.warning(
+                "The creator disputed %d finding(s). Check them before approving." % len(disputed)
+            )
+        note = st.text_area("Note to the creator", key="note_%d" % did, height=90)
+        a, b = st.columns(2)
+        if a.button("Approve", type="primary", use_container_width=True):
+            if note.strip():
+                wf.add_comment(did, user, role, note.strip())
+            wf.set_status(did, "approved", user, role, "approved")
+            st.rerun()
+        if b.button("Request changes", use_container_width=True):
+            if not note.strip():
+                st.warning("Add a note explaining what to change.")
+            else:
+                wf.add_comment(did, user, role, note.strip())
+                wf.set_status(did, "changes_requested", user, role, "changes requested")
+                st.rerun()
+    elif status == "in_review":
+        st.info("Waiting for a Manager or Reviewer to decide.")
+    else:
+        st.info("Waiting for the Creator to resolve findings and submit.")
+
+
 def show_draft(role, user):
     did = st.session_state.get("current_draft")
     if not did:
@@ -68,35 +149,65 @@ def show_draft(role, user):
     ver = db.latest_version(did)
     findings = db.get_findings(ver["id"])
     st.markdown(
-        "**%s**  |  version %d  |  status: `%s`" % (draft["title"], ver["version_no"], draft["status"])
+        "**%s**  |  version %d  |  status: **%s**"
+        % (draft["title"], ver["version_no"], STATUS_LABEL.get(draft["status"], draft["status"]))
     )
-    st.markdown(highlight(ver["content"], findings), unsafe_allow_html=True)
-    if not findings:
-        st.success("No issues found against the approved guidelines.")
-        return
-    open_n = sum(1 for f in findings if f["status"] == "open")
-    st.caption("%d findings, %d still open" % (len(findings), open_n))
-    for f in findings:
-        with st.container(border=True):
-            st.markdown("%s **%s** - %s" % (SEV_ICON[f["severity"]], f["category"], f["message"]))
-            if f["text"]:
-                st.markdown("Flagged text: `%s`" % f["text"])
-            st.markdown("Suggested fix: **%s**" % f["suggestion"])
-            with st.expander("Why? Source: %s %s" % (f["rule_id"], f["rule_title"])):
-                st.write(f["rule_text"])
-                if f["fact_id"]:
-                    st.write("Approved fact %s: %s" % (f["fact_id"], f["fact_text"]))
-            if role == "Creator":
-                a, b, c = st.columns([1, 1, 2])
-                if a.button("Accept", key="acc%d" % f["id"]):
-                    db.set_finding_status(f["id"], "accepted", user, role, did)
-                    st.rerun()
-                if b.button("Dispute", key="dis%d" % f["id"]):
-                    db.set_finding_status(f["id"], "disputed", user, role, did)
-                    st.rerun()
-                c.write("Status: **%s**" % f["status"])
-            else:
-                st.write("Status: **%s**" % f["status"])
+    workflow_panel(role, user, did, draft, ver, findings)
+
+    tab_f, tab_c, tab_h = st.tabs(["Findings", "Comments", "Versions and audit"])
+
+    with tab_f:
+        st.markdown(highlight(ver["content"], findings), unsafe_allow_html=True)
+        if not findings:
+            st.success("No issues found against the approved guidelines.")
+        else:
+            open_n = sum(1 for f in findings if f["status"] == "open")
+            st.caption("%d findings, %d still open" % (len(findings), open_n))
+        can_act = role == "Creator" and draft["status"] in EDITABLE
+        for f in findings:
+            with st.container(border=True):
+                st.markdown("%s **%s** - %s" % (SEV_ICON[f["severity"]], f["category"], f["message"]))
+                if f["text"]:
+                    st.markdown("Flagged text: `%s`" % f["text"])
+                st.markdown("Suggested fix: **%s**" % f["suggestion"])
+                with st.expander("Why? Source: %s %s" % (f["rule_id"], f["rule_title"])):
+                    st.write(f["rule_text"])
+                    if f["fact_id"]:
+                        st.write("Approved fact %s: %s" % (f["fact_id"], f["fact_text"]))
+                if can_act:
+                    a, b, c = st.columns([1, 1, 2])
+                    if a.button("Accept", key="acc%d" % f["id"]):
+                        db.set_finding_status(f["id"], "accepted", user, role, did)
+                        st.rerun()
+                    if b.button("Dispute", key="dis%d" % f["id"]):
+                        db.set_finding_status(f["id"], "disputed", user, role, did)
+                        st.rerun()
+                    c.write("Status: **%s**" % f["status"])
+                else:
+                    st.write("Status: **%s**" % f["status"])
+
+    with tab_c:
+        comments = wf.list_comments(did)
+        if not comments:
+            st.caption("No comments yet.")
+        for c in comments:
+            st.markdown("**%s** (%s)  \n%s" % (c["author"], c["role"], c["body"]))
+            st.caption(c["created_at"])
+        st.text_input("Add a comment", key="cm_%d" % did)
+        st.button("Post comment", on_click=post_comment, args=(did, user, role))
+
+    with tab_h:
+        st.markdown("**Revision history**")
+        for v in wf.list_versions(did):
+            with st.expander("Version %d by %s at %s" % (v["version_no"], v["created_by"], v["created_at"])):
+                st.text(v["content"])
+        st.markdown("**Audit trail**")
+        rows = [
+            {"time": a["created_at"], "who": a["actor"], "role": a["role"],
+             "action": a["action"], "detail": a["detail"]}
+            for a in wf.list_audit(did)
+        ]
+        st.dataframe(rows, use_container_width=True, hide_index=True)
 
 
 def main():
@@ -116,15 +227,16 @@ def main():
         drafts = db.list_drafts()
         if drafts:
             ids = [d["id"] for d in drafts]
-            labels = {d["id"]: "#%d %s (%s)" % (d["id"], d["title"], d["status"]) for d in drafts}
+            labels = {
+                d["id"]: "#%d %s (%s)" % (d["id"], d["title"], STATUS_LABEL.get(d["status"], d["status"]))
+                for d in drafts
+            }
             cur = st.session_state["current_draft"]
             idx = ids.index(cur) if cur in ids else 0
             picked = st.selectbox("Open a draft", ids, index=idx, format_func=lambda i: labels[i])
             st.session_state["current_draft"] = picked
         st.divider()
-        st.caption(
-            "Demo brand: GreenLeaf Organics (fictional). AI only suggests; humans decide."
-        )
+        st.caption("Demo brand: GreenLeaf Organics (fictional). AI only suggests; humans decide.")
 
     st.header("Review content before it goes live")
     left, right = st.columns([1, 1.3])
@@ -143,5 +255,5 @@ def main():
                 "You can open any draft from the sidebar."
             )
     with right:
-        st.subheader("2. Findings")
+        st.subheader("2. Findings and approval")
         show_draft(role, user)
