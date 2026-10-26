@@ -122,12 +122,12 @@ def workflow_panel(role, user, did, draft, ver, findings):
             )
         note = st.text_area("Note to the creator", key="note_%d" % did, height=90)
         a, b = st.columns(2)
-        if a.button("Approve", type="primary", use_container_width=True):
+        if a.button("Approve", type="primary", width='stretch'):
             if note.strip():
                 wf.add_comment(did, user, role, note.strip())
             wf.set_status(did, "approved", user, role, "approved")
             st.rerun()
-        if b.button("Request changes", use_container_width=True):
+        if b.button("Request changes", width='stretch'):
             if not note.strip():
                 st.warning("Add a note explaining what to change.")
             else:
@@ -207,7 +207,7 @@ def show_draft(role, user):
              "action": a["action"], "detail": a["detail"]}
             for a in wf.list_audit(did)
         ]
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.dataframe(rows, width='stretch', hide_index=True)
 
 
 def main():
@@ -246,8 +246,8 @@ def main():
             st.text_input("Title", key="draft_title")
             st.text_area("Paste your post or copy", key="draft_text", height=220)
             c1, c2 = st.columns(2)
-            c1.button("Load sample post", on_click=set_sample, use_container_width=True)
-            if c2.button("Run review", type="primary", use_container_width=True):
+            c1.button("Load sample post", on_click=set_sample, width='stretch')
+            if c2.button("Run review", type="primary", width='stretch'):
                 run_review(user, role)
         else:
             st.info(
