@@ -2,7 +2,7 @@ import html
 
 import streamlit as st
 
-from app.core.rules import review_text
+from app.core.review import review_text
 from app.db import database as db
 from app.db import workflow as wf
 
@@ -166,7 +166,7 @@ def show_draft(role, user):
         can_act = role == "Creator" and draft["status"] in EDITABLE
         for f in findings:
             with st.container(border=True):
-                st.markdown("%s **%s** - %s" % (SEV_ICON[f["severity"]], f["category"], f["message"]))
+                st.markdown("%s **%s** - %s%s" % (SEV_ICON[f["severity"]], f["category"], f["message"], "  `AI-suggested`" if f["source"] == "ai" else ""))
                 if f["text"]:
                     st.markdown("Flagged text: `%s`" % f["text"])
                 st.markdown("Suggested fix: **%s**" % f["suggestion"])

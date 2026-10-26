@@ -1,6 +1,7 @@
 import streamlit as st
 
 from app import views
+from app.core import llm
 from app.db import database as db
 from app.ui import STATUS_LABEL, run_review, set_sample, show_draft
 
@@ -40,6 +41,7 @@ def main():
                 picked = st.selectbox("Open a draft", ids, index=idx, format_func=lambda i: labels[i])
                 st.session_state["current_draft"] = picked
         st.divider()
+        st.caption("AI review layer: " + ("on" if llm.ai_available() else "off (rule checks only)"))
         st.caption("Demo brand: GreenLeaf Organics (fictional). AI only suggests; humans decide.")
 
     views.header(role)
