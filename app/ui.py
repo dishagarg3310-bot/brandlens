@@ -3,6 +3,7 @@ import html
 import streamlit as st
 
 from app.core.review import review_text
+from app.core import score
 from app.db import database as db
 from app.db import workflow as wf
 
@@ -152,39 +153,35 @@ def show_draft(role, user):
         "**%s**  |  version %d  |  status: **%s**"
         % (draft["title"], ver["version_no"], STATUS_LABEL.get(draft["status"], draft["status"]))
     )
+    score.render(findings)
     workflow_panel(role, user, did, draft, ver, findings)
+
+    from app.theme import apply_theme
+    apply_theme()
 
     tab_f, tab_c, tab_h = st.tabs(["Findings", "Comments", "Versions and audit"])
 
     with tab_f:
+        from app.ui_extras import MODERN_CSS, summary_html, card_html, sort_by_severity
+
+        st.markdown(MODERN_CSS, unsafe_allow_html=True)
         st.markdown(highlight(ver["content"], findings), unsafe_allow_html=True)
         if not findings:
             st.success("No issues found against the approved guidelines.")
         else:
-            open_n = sum(1 for f in findings if f["status"] == "open")
-            st.caption("%d findings, %d still open" % (len(findings), open_n))
+            st.markdown(summary_html(findings), unsafe_allow_html=True)
         can_act = role == "Creator" and draft["status"] in EDITABLE
-        for f in findings:
-            with st.container(border=True):
-                st.markdown("%s **%s** - %s%s" % (SEV_ICON[f["severity"]], f["category"], f["message"], "  `AI-suggested`" if f["source"] == "ai" else ""))
-                if f["text"]:
-                    st.markdown("Flagged text: `%s`" % f["text"])
-                st.markdown("Suggested fix: **%s**" % f["suggestion"])
-                with st.expander("Why? Source: %s %s" % (f["rule_id"], f["rule_title"])):
-                    st.write(f["rule_text"])
-                    if f["fact_id"]:
-                        st.write("Approved fact %s: %s" % (f["fact_id"], f["fact_text"]))
-                if can_act:
-                    a, b, c = st.columns([1, 1, 2])
-                    if a.button("Accept", key="acc%d" % f["id"]):
-                        db.set_finding_status(f["id"], "accepted", user, role, did)
-                        st.rerun()
-                    if b.button("Dispute", key="dis%d" % f["id"]):
-                        db.set_finding_status(f["id"], "disputed", user, role, did)
-                        st.rerun()
-                    c.write("Status: **%s**" % f["status"])
-                else:
-                    st.write("Status: **%s**" % f["status"])
+        DECISION = {"open": "Waiting for your decision", "accepted": "Accepted", "disputed": "Disputed"}
+        for f in sort_by_severity([dict(x) for x in findings]):
+            st.markdown(card_html(f, DECISION.get(f["status"], f["status"])), unsafe_allow_html=True)
+            if can_act:
+                a, b, _ = st.columns([1, 1, 4])
+                if a.button("Accept", key="acc%d" % f["id"], use_container_width=True):
+                    db.set_finding_status(f["id"], "accepted", user, role, did)
+                    st.rerun()
+                if b.button("Dispute", key="dis%d" % f["id"], use_container_width=True):
+                    db.set_finding_status(f["id"], "disputed", user, role, did)
+                    st.rerun()
 
     with tab_c:
         comments = wf.list_comments(did)
