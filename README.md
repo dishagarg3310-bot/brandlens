@@ -126,3 +126,8 @@ Python, Streamlit (UI), SQLite (drafts, versions, findings, comments, audit), pa
 
 Optional: set `ANTHROPIC\_API\_KEY` (in `.streamlit/secrets.toml` or as an environment variable) to enable the AI layer.
 
+## Testing
+
+    python -m unittest -v
+
+28 automated tests cover the rule layer: terminology, claims linked to approved facts, tone, accessibility and disclosures, plus checks that every finding cites a guideline and quotes text that really exists in the draft.

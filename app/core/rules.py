@@ -27,7 +27,8 @@ CLAIM_RULES = [
 ]
 
 ALLOWED_CAPS = {"PETA", "INDIA"}
-MONTHS = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*"
+MONTHS = (r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|"
+          r"aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)")
 
 
 def _finding(category, severity, rule_id, text, start, end, message, suggestion,
@@ -83,8 +84,13 @@ def review_text(text, passages=None, glossary=None, facts=None):
             m.group(0).capitalize(), passages))
     bangs = [i for i, ch in enumerate(text) if ch == "!"]
     if len(bangs) > 1:
+        run = re.search(r"!{2,}", text)
+        if run:
+            b_start, b_end = run.start(), run.end()
+        else:
+            b_start, b_end = bangs[1], bangs[1] + 1
         out.append(_finding(
-            "Tone", "low", "G1", "!" * len(bangs), bangs[1], bangs[-1] + 1,
+            "Tone", "low", "G1", text[b_start:b_end], b_start, b_end,
             "More than one exclamation mark per post.",
             "keep a single exclamation mark at most", passages))
 
@@ -106,8 +112,9 @@ def review_text(text, passages=None, glossary=None, facts=None):
     # Disclosures (G6)
     if re.search(r"\b\d+\s*%\s*off\b|\bdiscount\b|\bsale\b|\boffer\b", text, re.I):
         has_date = re.search(
-            r"\b(till|until|valid|ends?|expires?|through)\b|\b\d{1,2}[/-]\d{1,2}\b|\b"
-            + MONTHS + r"\b", text, re.I)
+            r"\b(till|until|valid|ends?|expires?|through)\b|\b\d{1,2}[/-]\d{1,2}\b|"
+            r"\b\d{1,2}(?:st|nd|rd|th)?\s+" + MONTHS + r"\b|\b" + MONTHS + r"\s+\d{1,2}\b",
+            text, re.I)
         if not has_date:
             out.append(_finding(
                 "Disclosure", "medium", "G6", "", None, None,
