@@ -3,6 +3,9 @@ import streamlit as st
 from app.style import CSS
 from app.main_ui import main
 from app.ui_extras import inject_css
+
+from app.theme import apply_theme
+apply_theme()
 inject_css()
 
 main()
