@@ -88,3 +88,10 @@ def main():
                     show_draft(role, user)
     else:
         views.admin_view()
+
+    if role != "Admin":
+        from app.insights import render_insights
+
+        label = "My recurring mistakes" if role == "Creator" else "Insights: repeated mistakes and unclear guidelines"
+        with st.expander(label):
+            render_insights(role, user)

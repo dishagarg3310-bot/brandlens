@@ -161,7 +161,7 @@ def _append_row(path, row):
 
 def admin_view():
     admin_user = ROLE_INFO["Admin"]["user"]
-    t1, t2, t3 = st.tabs(["Knowledge base", "Add to knowledge base", "Activity log"])
+    t1, t2, t3, t4 = st.tabs(["Knowledge base", "Add to knowledge base", "Activity log", "Insights"])
 
     with t1:
         with st.container(border=True):
@@ -215,3 +215,8 @@ def admin_view():
                 st.dataframe([dict(r) for r in rows], width="stretch", hide_index=True)
             else:
                 st.caption("No activity yet.")
+
+    with t4:
+        from app.insights import render_insights
+
+        render_insights("Admin", admin_user)
