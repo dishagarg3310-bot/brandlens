@@ -5,3 +5,9 @@ backgroundColor = "#F7F5EF"
 secondaryBackgroundColor = "#E6EFE2"
 textColor = "#1F2A24"
 font = "sans serif"
+
+[server]
+maxUploadSize = 5
+
+[client]
+toolbarMode = "minimal"

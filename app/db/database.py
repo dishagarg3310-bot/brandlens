@@ -139,8 +139,17 @@ def get_findings(version_id):
 
 
 def set_finding_status(finding_id, status, actor, role, draft_id):
+    """Only the Creator can accept or dispute, only while the draft is editable, and a repeated
+    click with the same decision changes nothing. Returns True when something changed."""
+    if status not in ("accepted", "disputed", "open") or role != "Creator":
+        return False
+    d = _query("SELECT status FROM drafts WHERE id = ?", (draft_id,))
+    f = _query("SELECT status FROM findings WHERE id = ?", (finding_id,))
+    if not d or not f or d[0]["status"] not in ("draft", "changes_requested") or f[0]["status"] == status:
+        return False
     _execute("UPDATE findings SET status = ? WHERE id = ?", (status, finding_id))
     log(draft_id, actor, role, "finding_" + status, "finding #%d" % finding_id)
+    return True
 
 
 def log(draft_id, actor, role, action, detail=""):

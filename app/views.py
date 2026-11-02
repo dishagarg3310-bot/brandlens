@@ -73,12 +73,12 @@ def _draft_stats():
 def header(role):
     info = ROLE_INFO[role]
     stats = _draft_stats()
-    st.markdown(
-        '<span class="role-badge" style="background:%s">%s %s view</span>'
-        % (info["color"], info["icon"], role),
-        unsafe_allow_html=True,
-    )
-    st.title(info["title"])
+    from app import design
+    from app.core import llm
+
+    ai_label = "AI layer on" if llm.ai_available() else "Rule checks (AI off)"
+    st.markdown(design.CSS, unsafe_allow_html=True)
+    design.hero(role, info, ai_label)
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Drafts", len(stats))
     c2.metric("Waiting for review", sum(1 for s in stats if s["status"] == "in_review"))
@@ -100,6 +100,15 @@ def _pick(sid, prefix, label, selected):
         st.rerun()
 
 
+def ensure_selected(role):
+    """Open the first draft that needs a decision, so the progress bar and the screen agree."""
+    stats = _draft_stats()
+    pending = [s for s in stats if s["status"] == "in_review"]
+    pending.sort(key=(lambda s: (-s["high"], s["id"])) if role == "Reviewer" else (lambda s: s["id"]))
+    if pending and st.session_state.get("current_draft") not in [s["id"] for s in stats]:
+        st.session_state["current_draft"] = pending[0]["id"]
+
+
 def queue_panel(role):
     stats = _draft_stats()
     pending = [s for s in stats if s["status"] == "in_review"]
@@ -113,6 +122,8 @@ def queue_panel(role):
         st.caption("Oldest first")
     if not pending:
         st.success("The queue is clear. Nothing is waiting for review.")
+    if pending and st.session_state.get("current_draft") not in [s["id"] for s in stats]:
+        st.session_state["current_draft"] = pending[0]["id"]   # open the first draft that needs a decision
     current = st.session_state.get("current_draft")
     for s in pending:
         label = "#%d  %s  |  %d findings, %d high-risk, %d disputed" % (
@@ -187,7 +198,13 @@ def admin_view():
                 with st.form("fact_form", clear_on_submit=True):
                     fact = st.text_input("A statement the brand can prove")
                     ok = st.form_submit_button("Add fact")
-                if ok and fact.strip():
+                fact_ok = 10 <= len(fact.strip()) <= 300
+                dup = fact.strip().lower() in [f["fact"].strip().lower() for f in load_facts()]
+                if ok and not fact_ok:
+                    st.warning("Write a full statement between 10 and 300 characters.")
+                elif ok and dup:
+                    st.warning("This fact is already in the approved list.")
+                elif ok:
                     nxt = max([int(f["fact_id"][1:]) for f in load_facts()] + [0]) + 1
                     _append_row(BRAND_DIR / "facts.csv", ["F%d" % nxt, fact.strip()])
                     db.log(None, admin_user, "Admin", "fact_added", "F%d" % nxt)
@@ -199,7 +216,9 @@ def admin_view():
                     banned = st.text_input("Term to avoid")
                     preferred = st.text_input("Preferred term")
                     ok2 = st.form_submit_button("Add term")
-                if ok2 and banned.strip() and preferred.strip():
+                if ok2 and not (3 <= len(banned.strip()) <= 60 and 2 <= len(preferred.strip()) <= 60):
+                    st.warning("Enter both terms (the term to avoid needs at least 3 characters, so it does not flag normal words).")
+                elif ok2:
                     _append_row(BRAND_DIR / "glossary.csv", ["G2", banned.strip(), preferred.strip()])
                     db.log(None, admin_user, "Admin", "term_added", banned.strip())
                     st.success("Added. New reviews will flag '%s'." % banned.strip())

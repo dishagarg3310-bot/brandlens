@@ -45,6 +45,7 @@ def seed_demo():
         "Please remove the medical and guarantee claims. Use the dermatologist-tested "
         "fact (F4) instead and resubmit.",
     )
+    wf.set_status(did, "in_review", RIYA[0], RIYA[1], "version 1")
     wf.set_status(did, "changes_requested", ARJUN[0], ARJUN[1], "changes requested")
 
     # C: approved, with two versions and a reviewer comment

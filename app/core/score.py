@@ -43,16 +43,9 @@ def render(findings):
     with st.container(border=True):
         left, right = st.columns([1, 1.4], gap="medium")
         with left:
-            st.markdown(
-                '<div style="text-align:center">'
-                '<div style="font-size:.85rem;color:#5f6b63;font-weight:600">BRAND HEALTH</div>'
-                '<div style="font-size:3.2rem;font-weight:800;line-height:1.1;color:%s">%d'
-                '<span style="font-size:1.1rem;color:#5f6b63">/100</span></div>'
-                '<div style="display:inline-block;margin-top:4px;padding:3px 12px;border-radius:999px;'
-                'background:%s;color:#fff;font-weight:700;font-size:.8rem">%s</div>'
-                "</div>" % (h["color"], h["score"], h["color"], h["label"]),
-                unsafe_allow_html=True,
-            )
+            from app import design
+            st.markdown(design.CSS, unsafe_allow_html=True)
+            st.markdown(design.ring(h["score"], h["color"], h["label"]), unsafe_allow_html=True)
             st.caption(
                 "%d high, %d medium, %d low severity"
                 % (h["by_severity"]["high"], h["by_severity"]["medium"], h["by_severity"]["low"])
