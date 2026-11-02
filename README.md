@@ -68,6 +68,7 @@ The draft then moves through a role-based human approval workflow. The system on
 - Risk-sorted approval queue, reviewer claim table
 - Workflow rules are enforced in the code, not only in the buttons (for example a draft cannot be approved twice, or approved before it is submitted)
 - **Apply accepted fixes:** the creator accepts findings, sees a preview (old text crossed out, new text in bold) and applies only those fixes in one click. The result is saved as a new version with a before and after health score. Only safe, ready-made replacements are applied (a preferred term, normal case instead of shouting, one exclamation mark, or wording taken from an approved fact). Advice-only findings and AI findings are never pasted into the text.
+- **"What the AI saw" panel:** under every review it shows the exact text that was sent to the AI service (after personal data was replaced with placeholders), how many emails, phone numbers, links or ID numbers were protected, which guideline passages and approved facts the AI was allowed to use, how many suggestions came back and how many passed the checks. When the AI was off or slow it says so and that nothing was sent. The record is saved with each version.
 - Download any review as a Markdown report or a CSV
 
 **Governance insights**
@@ -157,7 +158,7 @@ GEMINI_MODEL = "a-fast-flash-model-name"
 python -m unittest discover -s tests
 ```
 
-**125 automated tests** (3 OCR tests are skipped on machines without Tesseract):
+**140 automated tests** (3 OCR tests are skipped on machines without Tesseract):
 
 | File | Covers |
 |---|---|
@@ -165,6 +166,7 @@ python -m unittest discover -s tests
 | `test_ai_layer.py`, `test_provider.py` | redaction, retrieval, AI validation, provider switching, AI failures |
 | `test_documents.py` | PDF, DOCX, images, OCR, contrast, hostile and corrupt files |
 | `test_insights.py` | repeated mistakes, unclear-guideline detection |
+| `test_ai_trace.py`, `test_ai_filters.py` | the AI transparency panel (what is sent, protection of personal data, off or failed states) and the limits on what the AI may add |
 | `test_fixes.py` | apply accepted fixes: only safe, accepted, rule-based changes; previews; new version |
 | `test_robustness.py` | what a user might do: empty or huge text, HTML and markdown injection, repeated clicks, wrong role, empty database, whole-app flows for every role |
 
@@ -207,12 +209,11 @@ How to read this honestly:
 
 ## Roadmap
 
-1. **"What the AI saw" panel:** shows the redacted text sent, which passages were retrieved, and which provider answered.
-2. **Channel checks:** length, hashtags and disclosure rules per platform (Instagram, LinkedIn, X, email).
-3. **Two-key approval:** high-risk claims need both a Manager and a Reviewer.
-4. Self-service sign-up with Creator as the default role, and roles assigned by an Admin.
-5. A persistent database (for example Postgres) and single sign-on.
-6. Text-level contrast from OCR boxes, more Indian languages, and multi-brand workspaces.
+1. **Channel checks:** length, hashtags and disclosure rules per platform (Instagram, LinkedIn, X, email).
+2. **Two-key approval:** high-risk claims need both a Manager and a Reviewer.
+3. Self-service sign-up with Creator as the default role, and roles assigned by an Admin.
+4. A persistent database (for example Postgres) and single sign-on.
+5. Text-level contrast, medical and absolute-result claim rules, from OCR boxes, more Indian languages, and multi-brand workspaces.
 
 ## What changed since Round 2
 
@@ -220,6 +221,7 @@ How to read this honestly:
 - **Improvement 2, image and document review:** PDF, DOCX, images, OCR for scans and images, alt text, palette and WCAG contrast.
 - **Improvement 3, retrieval-backed AI judgement:** redaction, retrieval, citation check, an evaluation report with precision and recall, and a held-out set.
 - **Apply accepted fixes** with preview and before/after score.
+- **"What the AI saw"** transparency panel.
 - Real sign-in with roles, server-side workflow rules, robustness fixes found by testing, downloadable reports, a clearer interface (progress bar, "Next:" box, one-click demo sign-in) and a new visual design.
 
 ## Project structure

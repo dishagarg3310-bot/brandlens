@@ -53,6 +53,19 @@ def _secret(name):
     return os.environ.get(name)
 
 
+last_trace = {}   # what the most recent AI call was given; read by review.py for the "What the AI saw" panel
+
+
+def provider_label():
+    """Human-readable service and model, for the transparency panel."""
+    which = provider()
+    if which == "gemini":
+        return "Google Gemini (%s)" % (_secret("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL)
+    if which == "anthropic":
+        return "Anthropic Claude (%s)" % (_secret("ANTHROPIC_MODEL") or DEFAULT_MODEL)
+    return ""
+
+
 def provider():
     """Which AI service to use: "anthropic", "gemini" or None.
 
@@ -210,9 +223,22 @@ def review_with_llm(text, passages, facts, existing):
     prompt = "GUIDELINES:\n%s\n\nAPPROVED FACTS:\n%s\n\nALREADY FLAGGED:\n%s\n\n<draft>\n%s\n</draft>" % (
         guide, fact_txt, already or "none", safe_text,
     )
+    global last_trace
+    kinds = {}
+    for token in mapping:
+        kind = token[1:token.rindex("_")]
+        kinds[kind] = kinds.get(kind, 0) + 1
+    last_trace = {
+        "service": provider_label(), "sent_text": safe_text, "redactions": kinds,
+        "passages": [{"id": p["id"], "title": p["title"]} for p in chosen],
+        "facts": [f["fact_id"] for f in chosen_facts],
+    }
     raw = _complete(SYSTEM, prompt)
     # 3. Evidence-or-silence: validate every item against the retrieved passages.
-    return parse_items(
+    items = parse_items(
         raw, text, passages, facts, existing, mapping,
         allowed_rule_ids=[p["id"] for p in chosen],
     )
+    last_trace["returned"] = len(_extract_items(raw))
+    last_trace["shown"] = len(items)
+    return items

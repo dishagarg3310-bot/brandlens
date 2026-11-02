@@ -40,6 +40,12 @@ CREATE TABLE IF NOT EXISTS findings (
     source TEXT,
     status TEXT NOT NULL DEFAULT 'open'
 );
+CREATE TABLE IF NOT EXISTS ai_traces (
+    version_id INTEGER PRIMARY KEY,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS comments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     draft_id INTEGER NOT NULL,
@@ -69,6 +75,22 @@ def _conn():
 
 def _now():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def save_ai_trace(version_id, trace):
+    """Keep a record of what the AI layer was given for this version (or that it was not used)."""
+    import json
+    with closing(_conn()) as c:
+        c.execute("INSERT OR REPLACE INTO ai_traces (version_id, data, created_at) VALUES (?, ?, ?)",
+                  (version_id, json.dumps(trace), _now()))
+        c.commit()
+
+
+def get_ai_trace(version_id):
+    import json
+    with closing(_conn()) as c:
+        row = c.execute("SELECT data FROM ai_traces WHERE version_id = ?", (version_id,)).fetchone()
+    return json.loads(row["data"]) if row else None
 
 
 def init_db():

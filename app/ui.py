@@ -153,6 +153,7 @@ def run_review(user, role):
         for i, f in enumerate(findings, 1):
             f["id"] = "R%d" % i
         db.save_findings(vid, findings)
+        _save_trace(vid)
         db.log(draft_id, user, role, "review_run", "%d findings" % len(findings))
     clear_upload()
     if st.session_state.get("ai_status") in ("failed", "limit"):
@@ -193,6 +194,7 @@ def apply_fixes_panel(did, user, role, ver, findings):
             vid, vno = db.add_version(did, new_text, user)
             fs = review_text(new_text)
             db.save_findings(vid, fs)
+            _save_trace(vid)
             wf.set_status(did, "draft", user, role, "new version %d" % vno)
             after = score.health_score(fs)["score"]
             db.log(did, user, role, "fixes_applied", "v%d: %d fixes, health %d to %d" % (vno, len(ready), before, after))
@@ -236,6 +238,7 @@ def workflow_panel(role, user, did, draft, ver, findings):
                         vid, vno = db.add_version(did, new, user)
                         fs = review_text(new)
                         db.save_findings(vid, fs)
+                        _save_trace(vid)
                         wf.set_status(did, "draft", user, role, "new version %d" % vno)
                         db.log(did, user, role, "new_version", "v%d, %d findings" % (vno, len(fs)))
                         st.rerun()
@@ -296,6 +299,66 @@ def journey(role):
         steps = ["Pick a draft", "Check the findings", "Decide"]
         cur = 1 if status == "in_review" else (3 if status == "approved" else 0)
     return steps, cur
+
+
+REDACTION_NAMES = {"EMAIL": "email address", "URL": "web link", "UPI": "UPI id",
+                   "ID": "ID number (PAN or Aadhaar style)", "PHONE": "phone number"}
+
+
+def _save_trace(version_id):
+    trace = st.session_state.pop("ai_trace", None)
+    if trace:
+        db.save_ai_trace(version_id, trace)
+
+
+def ai_trace_panel(ver):
+    """Show exactly what the AI layer was given for this version, and what came back."""
+    t = db.get_ai_trace(ver["id"])
+    with st.expander("\U0001F50E What the AI saw: privacy and transparency"):
+        if t is None:
+            st.caption("There is no AI record for this version. It was made before AI records were kept.")
+            return
+        status = t.get("status")
+        if status == "off":
+            why = ("The AI layer was switched off for this review."
+                   if t.get("reason") == "switched_off" else "No AI service is set up on this server.")
+            st.success("No outside service was called for this review. " + why +
+                       " Every finding came from the rule engine and the approved guidelines and facts.")
+            return
+        if status == "limit":
+            st.info("The AI limit for this session was reached, so this review used rule checks only. "
+                    "Nothing was sent to an outside service.")
+            return
+        service = t.get("service") or "the configured AI service"
+        if status == "failed":
+            st.warning("%s did not answer in time (%s s). The review continued with rule checks only."
+                       % (service, t.get("seconds", "?")))
+        elif t.get("cached"):
+            st.markdown("**Service:** %s. This text had already been checked in this session, so the earlier "
+                        "answer was reused and nothing new was sent." % md_escape(service))
+        else:
+            st.markdown("**Service:** %s &nbsp;|&nbsp; **Answered in:** %s seconds" % (md_escape(service), t.get("seconds", "?")))
+        kinds = t.get("redactions") or {}
+        if kinds:
+            parts = ["%d %s%s" % (n, REDACTION_NAMES.get(k, k.lower()), "" if n == 1 else "s") for k, n in kinds.items()]
+            st.markdown("**Personal data protected:** %s replaced with placeholders such as [EMAIL_1] before "
+                        "sending. The AI never saw the originals." % ", ".join(parts))
+        else:
+            st.markdown("**Personal data protected:** no emails, phone numbers, links or ID numbers were found in this draft.")
+        if t.get("sent_text") is not None:
+            st.markdown("**The text that was sent (after protection):**")
+            st.code(t["sent_text"], language=None, wrap_lines=True)
+        passages = t.get("passages") or []
+        if passages:
+            st.markdown("**Guideline passages the AI was allowed to use:** " +
+                        ", ".join("%s (%s)" % (p["id"], md_escape(p["title"])) for p in passages))
+        if t.get("facts"):
+            st.markdown("**Approved facts shown to it:** " + ", ".join(t["facts"]))
+        if status == "ok" and "returned" in t:
+            st.markdown("**What came back:** %d suggestion%s. %d passed our checks (a real guideline, wording that is "
+                        "really in the draft, an allowed type) and show up as AI-suggested findings; the rest were discarded."
+                        % (t["returned"], "" if t["returned"] == 1 else "s", t.get("shown", 0)))
+        st.caption("AI findings are suggestions only. A person accepts, disputes or approves every one.")
 
 
 def next_step_box(role, draft, open_n, disputed_n):
@@ -366,6 +429,7 @@ def show_draft(role, user):
             "Download findings (.csv)", export.findings_csv(findings),
             file_name="brandlens_findings_%d_v%d.csv" % (did, ver["version_no"]), mime="text/csv",
             use_container_width=True)
+    ai_trace_panel(ver)
 
     from app.theme import apply_theme
     apply_theme()
