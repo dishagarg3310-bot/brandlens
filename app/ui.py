@@ -6,6 +6,7 @@ import streamlit as st
 from app.core.review import review_text
 from app.core import score
 from app.core import documents
+from app.core import fixes
 from app.core import llm
 from app.db import database as db
 from app.db import workflow as wf
@@ -169,6 +170,36 @@ def post_comment(did, user, role):
         st.session_state[key] = ""
 
 
+def apply_fixes_panel(did, user, role, ver, findings):
+    """Creator: preview and apply the fixes already accepted, as a new version."""
+    ready = fixes.plan(ver["content"], findings)
+    total = fixes.fixable_count(findings)
+    if not total:
+        return
+    title = ("Apply %d accepted fix%s in one click" % (len(ready), "" if len(ready) == 1 else "es")
+             if ready else "%d finding%s ha%s a ready-made fix" % (total, "" if total == 1 else "s", "s" if total == 1 else "ve"))
+    with st.expander("\u2728 " + title, expanded=bool(ready)):
+        if not ready:
+            st.caption("Press Accept on a finding to include its fix here. You will see exactly what changes "
+                       "before anything is saved.")
+            return
+        st.caption("Only the fixes you accepted are applied. Everything else stays open for you to decide. "
+                   "The result is saved as a new version, so nothing is lost.")
+        for c in ready:
+            st.markdown("%s &nbsp; ~~%s~~ &nbsp;\u2192&nbsp; **%s**" % (c["category"], md_escape(c["old"]), md_escape(c["new"])))
+        if st.button("Apply these fixes and save a new version", type="primary", key="applyfix_%d_%d" % (did, ver["version_no"])):
+            before = score.health_score(findings)["score"]
+            new_text = fixes.apply(ver["content"], ready)
+            vid, vno = db.add_version(did, new_text, user)
+            fs = review_text(new_text)
+            db.save_findings(vid, fs)
+            wf.set_status(did, "draft", user, role, "new version %d" % vno)
+            after = score.health_score(fs)["score"]
+            db.log(did, user, role, "fixes_applied", "v%d: %d fixes, health %d to %d" % (vno, len(ready), before, after))
+            st.session_state["_fix_result"] = (len(ready), before, after, vno)
+            st.rerun()
+
+
 def workflow_panel(role, user, did, draft, ver, findings):
     status = draft["status"]
     open_n = sum(1 for f in findings if f["status"] == "open")
@@ -187,6 +218,7 @@ def workflow_panel(role, user, did, draft, ver, findings):
         return
 
     if role == "Creator" and status in EDITABLE:
+        apply_fixes_panel(did, user, role, ver, findings)
         if open_n:
             st.caption("The Submit button appears once every finding is accepted or disputed.")
         elif st.button("Submit for review", type="primary"):
@@ -305,6 +337,12 @@ def show_draft(role, user):
         "**%s**  |  version %d  |  status: **%s**"
         % (md_escape(draft["title"]), ver["version_no"], STATUS_LABEL.get(draft["status"], draft["status"]))
     )
+    result = st.session_state.pop("_fix_result", None)
+    if result:
+        from app import design
+        n, before, after, vno = result
+        design.next_step("Applied %d fix%s: brand health went from %d to %d." % (n, "" if n == 1 else "es", before, after),
+                         "Saved as version %d. The older version is still in the history tab." % vno, "ok")
     notice = st.session_state.pop("_ai_notice", None)
     if notice == "failed":
         st.warning("The AI layer did not answer in time, so this review used the rule checks only. "
