@@ -67,6 +67,7 @@ The draft then moves through a role-based human approval workflow. The system on
 - Comments, version history (every edit is a new version), full audit log
 - Risk-sorted approval queue, reviewer claim table
 - Workflow rules are enforced in the code, not only in the buttons (for example a draft cannot be approved twice, or approved before it is submitted)
+- **Apply accepted fixes:** the creator accepts findings, sees a preview (old text crossed out, new text in bold) and applies only those fixes in one click. The result is saved as a new version with a before and after health score. Only safe, ready-made replacements are applied (a preferred term, normal case instead of shouting, one exclamation mark, or wording taken from an approved fact). Advice-only findings and AI findings are never pasted into the text.
 - Download any review as a Markdown report or a CSV
 
 **Governance insights**
@@ -156,7 +157,7 @@ GEMINI_MODEL = "a-fast-flash-model-name"
 python -m unittest discover -s tests
 ```
 
-**114 automated tests** (3 OCR tests are skipped on machines without Tesseract):
+**125 automated tests** (3 OCR tests are skipped on machines without Tesseract):
 
 | File | Covers |
 |---|---|
@@ -164,6 +165,7 @@ python -m unittest discover -s tests
 | `test_ai_layer.py`, `test_provider.py` | redaction, retrieval, AI validation, provider switching, AI failures |
 | `test_documents.py` | PDF, DOCX, images, OCR, contrast, hostile and corrupt files |
 | `test_insights.py` | repeated mistakes, unclear-guideline detection |
+| `test_fixes.py` | apply accepted fixes: only safe, accepted, rule-based changes; previews; new version |
 | `test_robustness.py` | what a user might do: empty or huge text, HTML and markdown injection, repeated clicks, wrong role, empty database, whole-app flows for every role |
 
 **Evaluation of the review engine** (`python -m evaluation.run_eval`, add `--ai` for the AI layer, `--set holdout` for unseen posts):
@@ -171,10 +173,19 @@ python -m unittest discover -s tests
 | Set | Mode | Precision | Recall |
 |---|---|---|---|
 | Development, 51 posts (rules were tuned on these) | rules only | 100% | 100% |
-| Development, 51 posts | rules and AI | 98% | 100% |
+| Development, 51 posts | rules and AI | 88% | 100% |
 | **Held-out, 15 new posts written after tuning** | rules only | 77% | 62% |
+| **Held-out, 15 new posts** | rules and AI | 59% | 81% |
 
-The held-out result is the honest one for rules alone: keyword rules miss new wordings, which is exactly why the AI layer exists. Full reports are in `evaluation/`. On the development set the one AI "false alarm" (post P42) is a defensible off-tone finding that the labels did not include; it was not relabelled to improve the score.
+AI results use `gemini-3.1-flash-lite` and the final prompt. Full reports, including every false alarm and every miss, are in `evaluation/`.
+
+How to read this honestly:
+
+- **Rules alone** are precise on the posts they were tuned on, but they miss new wordings: on unseen posts recall drops to 62%.
+- **Adding the AI layer** raises recall on unseen posts from 62% to 81%, but it also adds false alarms (precision 77% to 59%). Some of those "false alarms" describe a real issue under a different label (for example a jargon-heavy sentence labelled Accessibility in our set but called Tone by the AI). We did not relabel anything to improve the score.
+- That is why AI findings are only **suggestions**: those the AI is unsure about are shown as low severity with "Needs human judgement", the creator can dispute any finding, and the AI can be switched off.
+- Two of the 15 held-out AI calls and none of the dev calls timed out even with a 30 second limit; in those cases the review used rule checks only, as designed.
+- An earlier prompt and model reached 98% precision on the development set. The numbers above are for the final configuration. The held-out set was used only for measuring, not for tuning.
 
 ## Security and accessibility
 
@@ -191,23 +202,24 @@ The held-out result is the honest one for rules alone: keyword rules miss new wo
 - OCR reads clean printed text well. Photos, handwriting and very small text can contain mistakes, so the app asks the user to check the extracted text.
 - Scanned PDFs: only the first 5 pages are read with OCR.
 - Contrast is estimated from the image's dominant colours, not from the exact text and background pixels.
+- Applied fixes are word-level, so a replacement can need a small grammar touch-up (for example "cosmetics are" becomes "skincare are"). The creator can edit the new version straight away.
 - One brand per deployment. English and Hinglish are tested; other languages are not.
 
 ## Roadmap
 
-1. **Apply accepted fixes:** one click applies only the fixes the creator accepted and saves a new version, with a before and after score.
-2. **"What the AI saw" panel:** shows the redacted text sent, which passages were retrieved, and which provider answered.
-3. **Channel checks:** length, hashtags and disclosure rules per platform (Instagram, LinkedIn, X, email).
-4. **Two-key approval:** high-risk claims need both a Manager and a Reviewer.
-5. Self-service sign-up with Creator as the default role, and roles assigned by an Admin.
-6. A persistent database (for example Postgres) and single sign-on.
-7. Text-level contrast from OCR boxes, more Indian languages, and multi-brand workspaces.
+1. **"What the AI saw" panel:** shows the redacted text sent, which passages were retrieved, and which provider answered.
+2. **Channel checks:** length, hashtags and disclosure rules per platform (Instagram, LinkedIn, X, email).
+3. **Two-key approval:** high-risk claims need both a Manager and a Reviewer.
+4. Self-service sign-up with Creator as the default role, and roles assigned by an Admin.
+5. A persistent database (for example Postgres) and single sign-on.
+6. Text-level contrast from OCR boxes, more Indian languages, and multi-brand workspaces.
 
 ## What changed since Round 2
 
 - **Improvement 1, governance insights dashboard:** repeated mistakes, per-creator view, possibly unclear guidelines.
 - **Improvement 2, image and document review:** PDF, DOCX, images, OCR for scans and images, alt text, palette and WCAG contrast.
 - **Improvement 3, retrieval-backed AI judgement:** redaction, retrieval, citation check, an evaluation report with precision and recall, and a held-out set.
+- **Apply accepted fixes** with preview and before/after score.
 - Real sign-in with roles, server-side workflow rules, robustness fixes found by testing, downloadable reports, a clearer interface (progress bar, "Next:" box, one-click demo sign-in) and a new visual design.
 
 ## Project structure
@@ -216,13 +228,13 @@ The held-out result is the honest one for rules alone: keyword rules miss new wo
 streamlit_app.py        entry point
 app/
   main_ui.py            page layout and sidebar
-  ui.py, views.py       draft screens, queue, claim table, admin
+  ui.py, views.py       draft screens, queue, claim table, admin, apply-fixes panel
   design.py             welcome animation, banner, progress bar, sign-in look
   auth.py               sign-in
   insights.py           governance insights
   export.py             report and CSV download
   seed.py               demo drafts
-  core/                 review, rules, documents (PDF, DOCX, OCR, images),
+  core/                 review, rules, fixes, documents (PDF, DOCX, OCR, images),
                         llm, retrieval, redaction, score, knowledge
   db/                   database, workflow
 data/sample_brand/      guidelines.md, facts.csv, glossary.csv (fictional brand)

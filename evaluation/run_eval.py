@@ -60,6 +60,7 @@ def main():
     else:
         POSTS = DEV_POSTS
 
+    llm.AI_TIMEOUT = int(os.environ.get("AI_TIMEOUT", "30"))   # evaluation can wait longer than the live app
     use_ai = args.ai and llm.ai_available()
     if args.ai and not use_ai:
         print("No ANTHROPIC_API_KEY or GEMINI_API_KEY found: running the rule engine only.")
