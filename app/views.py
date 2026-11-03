@@ -1,11 +1,13 @@
 import csv
+import html
 import io
 
 import streamlit as st
 
+from app.core import assets, documents, guideline_import, knowledge
 from app.core.knowledge import BRAND_DIR, load_facts, load_glossary, load_guidelines
 from app.db import database as db
-from app.ui import STATUS_LABEL
+from app.ui import STATUS_LABEL, md_escape
 
 ROLE_INFO = {
     "Creator": {
@@ -170,9 +172,190 @@ def _append_row(path, row):
     path.write_text(text + "\n" + buf.getvalue(), encoding="utf-8")
 
 
+def _forget_ai_answers():
+    """Guidelines or colours changed, so earlier AI answers (kept per session) are out of date."""
+    st.session_state.pop("ai_cache", None)
+
+
+def _swatches(colours):
+    chips = []
+    for c in colours:
+        if not assets.HEX.match(str(c.get("hex", ""))):
+            continue
+        chips.append(
+            '<span style="display:inline-flex;align-items:center;gap:8px;margin:0 14px 8px 0">'
+            '<span style="width:26px;height:26px;border-radius:8px;background:%s;border:1px solid rgba(0,0,0,.25)"></span>'
+            "<span><b>%s</b> <span style='opacity:.7'>%s</span></span></span>"
+            % (c["hex"], html.escape(str(c.get("name", ""))), c["hex"].upper()))
+    return "".join(chips) or "<i>No colours yet.</i>"
+
+
+def brand_assets_panel():
+    """What a Creator can reuse: the approved colours and images."""
+    store = assets.load_assets()
+    st.caption("Use these approved colours and images in your content. They are kept by the Admin.")
+    st.markdown(_swatches(store["colours"]), unsafe_allow_html=True)
+    if not store["images"]:
+        st.caption("No approved images have been added yet.")
+    for img in store["images"]:
+        c1, c2 = st.columns([1, 3])
+        try:
+            c1.image(assets.image_bytes(img), width=110)
+        except OSError:
+            c1.caption("(file missing)")
+        c2.markdown("**%s**  \nAlt text: %s%s" % (md_escape(img["name"]), md_escape(img["alt"]),
+                                                  ("  \nUse: " + md_escape(img["usage"])) if img["usage"] else ""))
+        try:
+            c2.download_button("Download", assets.image_bytes(img), file_name=img["file"], key="dl_" + img["id"])
+        except OSError:
+            pass
+
+
+def _guideline_import_tab(admin_user):
+    import pandas as pd
+
+    with st.container(border=True):
+        st.markdown("#### Import guidelines from a document")
+        st.caption("Upload your brand book (PDF, Word, Markdown or text). BrandLens splits it into passages, "
+                   "you check them, and only the ones you tick are added. Imported passages get new ids (G7, G8, ...). "
+                   "They are used by the AI layer and shown to reviewers; the exact-match rules for G1 to G6 stay as they are.")
+        st.caption("Privacy: guideline passages can be sent to the AI service so it can judge drafts against them. "
+                   "Passages with emails, phone numbers, links or ID numbers are left out unless you remove those details.")
+        up = st.file_uploader("Brand book or guideline document", type=["pdf", "docx", "md", "txt"], key="gl_upload")
+        if up is None:
+            return
+        sig = (up.name, up.size)
+        if st.session_state.get("gl_sig") != sig:
+            st.session_state.pop("gl_rows", None)
+            try:
+                res = documents.extract_document(up.name, up.getvalue())
+                found = guideline_import.split_passages(res["text"])
+                if not found:
+                    st.warning("No readable text was found in this file.")
+                    return
+                st.session_state["gl_rows"] = guideline_import.prepare(found, load_guidelines())
+                st.session_state["gl_notes"] = res["notes"]
+                st.session_state["gl_sig"] = sig
+            except ValueError as e:
+                st.error(str(e))
+                return
+        rows = st.session_state.get("gl_rows")
+        if rows is None:
+            ids = st.session_state.get("gl_done") or []
+            st.success("Added %s. They are listed under Knowledge base and used by the AI layer from the next review."
+                       % ", ".join(ids) if ids else "Those passages were added.")
+            st.caption("Upload another file to import more.")
+            return
+        for n in st.session_state.get("gl_notes", []):
+            st.caption("Note: " + n)
+        ticked = sum(1 for r in rows if r["use"])
+        st.markdown("**%d passages found, %d ticked.** Change a title or text, untick what you do not want."
+                    % (len(rows), ticked))
+        edited = st.data_editor(
+            pd.DataFrame(rows)[["use", "title", "text", "note"]], key="gl_editor", hide_index=True,
+            width="stretch", num_rows="fixed",
+            column_config={"use": st.column_config.CheckboxColumn("Add?", width="small"),
+                           "title": st.column_config.TextColumn("Title", max_chars=guideline_import.MAX_TITLE),
+                           "text": st.column_config.TextColumn("Passage text", max_chars=guideline_import.MAX_CHARS, width="large"),
+                           "note": st.column_config.TextColumn("Note", disabled=True)})
+        out = edited.to_dict("records")
+        n_ticked = sum(1 for r in out if r["use"])
+        if st.button("Add %d passage%s to the guidelines" % (n_ticked, "" if n_ticked == 1 else "s"),
+                     type="primary", disabled=n_ticked == 0):
+            try:
+                ids = guideline_import.commit(out)
+            except ValueError as e:
+                st.error(str(e))
+            else:
+                db.log(None, admin_user, "Admin", "guidelines_imported", "%s: %s" % (up.name[:40], ", ".join(ids)))
+                _forget_ai_answers()
+                st.session_state.pop("gl_rows", None)
+                st.session_state["gl_done"] = ids
+                st.rerun()
+
+
+def _brand_assets_tab(admin_user):
+    store = assets.load_assets()
+    a, b = st.columns(2, gap="large")
+    with a:
+        with st.container(border=True):
+            st.markdown("#### Brand colours")
+            st.markdown(_swatches(store["colours"]), unsafe_allow_html=True)
+            st.caption("Image reviews compare uploaded images with these colours. The colours are also written into "
+                       "guideline G5, so the rules and the AI read the same palette.")
+            with st.form("colour_form", clear_on_submit=True):
+                name = st.text_input("Colour name", max_chars=30, placeholder="for example: sage")
+                code = st.color_picker("Pick the colour", value="#2E7D32")
+                add = st.form_submit_button("Add colour")
+            if add:
+                try:
+                    assets.add_colour(name, code)
+                except ValueError as e:
+                    st.error(str(e))
+                else:
+                    db.log(None, admin_user, "Admin", "colour_added", "%s %s" % (name.strip()[:30], code.upper()))
+                    _forget_ai_answers()
+                    st.success("Added. New image reviews use this colour.")
+                    st.rerun()
+            labels = {"%s  %s" % (c["name"], c["hex"].upper()): c["hex"] for c in store["colours"]}
+            drop = st.multiselect("Remove colours", list(labels))
+            if st.button("Remove selected", disabled=not drop):
+                try:
+                    assets.remove_colours([labels[d] for d in drop])
+                except ValueError as e:
+                    st.error(str(e))
+                else:
+                    db.log(None, admin_user, "Admin", "colour_removed", ", ".join(drop)[:80])
+                    _forget_ai_answers()
+                    st.rerun()
+    with b:
+        with st.container(border=True):
+            st.markdown("#### Approved images")
+            st.caption("Add logos and standard images with approved alt text. Creators can download them, and an "
+                       "upload that is identical to one of these is recognised in the image review.")
+            with st.form("image_form", clear_on_submit=True):
+                f = st.file_uploader("Image (PNG, JPG or WEBP, up to 2 MB)", type=["png", "jpg", "jpeg", "webp"])
+                iname = st.text_input("Name", max_chars=50, placeholder="for example: Leaf logo, green")
+                ialt = st.text_input("Approved alt text", max_chars=250, placeholder="Describe what the image shows")
+                iuse = st.text_input("Usage note (optional)", max_chars=200, placeholder="for example: keep clear space around it")
+                add_i = st.form_submit_button("Add approved image")
+            if add_i:
+                if f is None:
+                    st.warning("Choose an image first.")
+                else:
+                    try:
+                        new_id = assets.add_image(iname, ialt, iuse, f.getvalue(), f.name)
+                    except ValueError as e:
+                        st.error(str(e))
+                    else:
+                        db.log(None, admin_user, "Admin", "image_added", "%s %s" % (new_id, iname.strip()[:40]))
+                        st.success("Added %s." % new_id)
+                        st.rerun()
+            for img in store["images"]:
+                c1, c2, c3 = st.columns([1, 3, 1])
+                try:
+                    c1.image(assets.image_bytes(img), width=90)
+                except OSError:
+                    c1.caption("(file missing)")
+                c2.markdown("**%s** (%s)  \n%s" % (md_escape(img["name"]), img["id"], md_escape(img["alt"])))
+                if c3.button("Remove", key="rmimg_" + img["id"]):
+                    try:
+                        assets.remove_image(img["id"])
+                    except ValueError as e:
+                        st.error(str(e))
+                    else:
+                        db.log(None, admin_user, "Admin", "image_removed", img["id"])
+                        st.rerun()
+
+
 def admin_view():
     admin_user = ROLE_INFO["Admin"]["user"]
-    t1, t2, t3, t4 = st.tabs(["Knowledge base", "Add to knowledge base", "Activity log", "Insights"])
+    t1, t2, t_imp, t_ast, t3, t4 = st.tabs(
+        ["Knowledge base", "Add to knowledge base", "Import guidelines", "Brand assets", "Activity log", "Insights"])
+    with t_imp:
+        _guideline_import_tab(admin_user)
+    with t_ast:
+        _brand_assets_tab(admin_user)
 
     with t1:
         with st.container(border=True):
@@ -180,6 +363,11 @@ def admin_view():
             for p in load_guidelines():
                 with st.expander("%s  %s" % (p["id"], p["title"])):
                     st.write(p["text"])
+                    if p["id"] not in knowledge.CORE_IDS and st.button("Remove %s" % p["id"], key="rmg_" + p["id"]):
+                        knowledge.remove_guideline(p["id"])
+                        db.log(None, admin_user, "Admin", "guideline_removed", p["id"])
+                        _forget_ai_answers()
+                        st.rerun()
         a, b = st.columns(2, gap="large")
         with a:
             with st.container(border=True):

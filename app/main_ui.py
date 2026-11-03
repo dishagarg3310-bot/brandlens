@@ -75,6 +75,8 @@ def main():
                 c1.button("Load sample post", on_click=set_sample, width="stretch")
                 if c2.button("Run review", type="primary", width="stretch"):
                     run_review(user, role)
+            with st.expander("Approved brand colours and images"):
+                views.brand_assets_panel()
         with right:
             with st.container(border=True):
                 st.markdown("#### \U0001F50E 2. Findings and approval")

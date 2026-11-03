@@ -76,8 +76,10 @@ The draft then moves through a role-based human approval workflow. The system on
 - Per-creator view ("Your recurring mistakes")
 - **Possibly unclear guidelines:** rules that creators dispute often are flagged, so the admin knows which guideline to rewrite
 
-**Admin**
+**Admin: the brand knowledge**
 - View and extend guidelines, approved facts and preferred terms
+- **Import guidelines from a document:** upload a brand book (PDF, Word, Markdown or text). It is split into passages (by headings, or by paragraphs when there are none), the Admin reviews and edits a preview table, and only the ticked passages are added with new ids (G7, G8, ...). Passages with personal data (email, phone, link, ID number), duplicates and very short ones start unticked. Imported passages are used by the AI layer (retrieval and citations) and shown to reviewers; the exact-match rules for G1 to G6 stay as they are. Imported passages can be removed again.
+- **Brand assets editor:** add and remove named brand colours (they are also written into guideline G5, so the image check, the rules and the AI all read the same palette) and keep a library of approved images with approved alt text and usage notes. Creators see the colours and can download the images; an upload that is identical to an approved image is recognised in the image review.
 - Activity log
 
 ## Architecture
@@ -158,7 +160,7 @@ GEMINI_MODEL = "a-fast-flash-model-name"
 python -m unittest discover -s tests
 ```
 
-**140 automated tests** (3 OCR tests are skipped on machines without Tesseract):
+**172 automated tests** (3 OCR tests are skipped on machines without Tesseract):
 
 | File | Covers |
 |---|---|
@@ -167,6 +169,7 @@ python -m unittest discover -s tests
 | `test_documents.py` | PDF, DOCX, images, OCR, contrast, hostile and corrupt files |
 | `test_insights.py` | repeated mistakes, unclear-guideline detection |
 | `test_ai_trace.py`, `test_ai_filters.py` | the AI transparency panel (what is sent, protection of personal data, off or failed states) and the limits on what the AI may add |
+| `test_assets_and_import.py` | guideline import (splitting, preview rules, adding, removing, retrieval), brand colours, approved images, recognition in image review, the new Admin screens |
 | `test_fixes.py` | apply accepted fixes: only safe, accepted, rule-based changes; previews; new version |
 | `test_robustness.py` | what a user might do: empty or huge text, HTML and markdown injection, repeated clicks, wrong role, empty database, whole-app flows for every role |
 
@@ -205,6 +208,8 @@ How to read this honestly:
 - Scanned PDFs: only the first 5 pages are read with OCR.
 - Contrast is estimated from the image's dominant colours, not from the exact text and background pixels.
 - Applied fixes are word-level, so a replacement can need a small grammar touch-up (for example "cosmetics are" becomes "skincare are"). The creator can edit the new version straight away.
+- Imported guidelines feed the AI layer and reviewers; they do not create new exact-match rules. The Admin can turn a guideline into a rule by adding approved facts and preferred terms.
+- Imported guidelines, colours and images are saved as files next to the app, so on the free Streamlit Cloud tier they can reset when the app restarts.
 - One brand per deployment. English and Hinglish are tested; other languages are not.
 
 ## Roadmap
@@ -237,6 +242,7 @@ app/
   export.py             report and CSV download
   seed.py               demo drafts
   core/                 review, rules, fixes, documents (PDF, DOCX, OCR, images),
+                        guideline_import, assets,
                         llm, retrieval, redaction, score, knowledge
   db/                   database, workflow
 data/sample_brand/      guidelines.md, facts.csv, glossary.csv (fictional brand)

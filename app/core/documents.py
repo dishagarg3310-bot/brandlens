@@ -269,6 +269,16 @@ def review_image(filename, data, alt_text, passages=None):
         raise ValueError("This file is not a valid image.")
 
     notes = []
+    approved = None
+    try:
+        from app.core import assets
+        approved = assets.match_asset(data)
+    except Exception:
+        approved = None
+    if approved:
+        notes.append("This is the approved brand image '%s'. Its approved alt text is used." % approved["name"])
+        if not (alt_text or "").strip():
+            alt_text = approved["alt"]
     ocr_text = _ocr_image(img)
     if not ocr_available():
         notes.append("Text recognition (OCR) is not installed on this server, so only the alt text, colours "
@@ -289,8 +299,8 @@ def review_image(filename, data, alt_text, passages=None):
     palette = brand_palette(passages)
     colors = dominant_colors(img)
     prominent = [rgb for rgb, share in colors if share >= 0.08]
-    matched = None
-    if palette:
+    matched = True if approved else None
+    if palette and not approved:
         matched = any(_distance(rgb, hex_to_rgb(b)) <= 60 for rgb in prominent for b in palette)
         if not matched:
             findings.append(_finding(
@@ -326,6 +336,7 @@ def review_image(filename, data, alt_text, passages=None):
         "width": width, "height": height, "format": img.format,
         "swatches": ["#%02X%02X%02X" % rgb for rgb, share in colors if share >= 0.05],
         "palette_match": matched,
+        "approved_asset": approved["name"] if approved else None,
         "text_contrast": (int(text_contrast * 10) / 10.0) if text_contrast is not None else None,
     }
     return {"findings": findings, "info": info, "text": ocr_text, "notes": notes}
